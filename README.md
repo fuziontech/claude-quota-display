@@ -114,6 +114,37 @@ That's it. Reboot and your Pi comes up as a Claude quota gauge.
 
 ---
 
+## Running it on a Mac (development)
+
+You don't need a Pi to hack on this. On macOS the app adapts automatically:
+
+- **Credentials** — Claude Code stores its OAuth token in the **login Keychain**
+  on a Mac, not in `~/.claude/.credentials.json`. `quota_api.py` detects this and
+  reads (and refreshes, if needed) the Keychain item directly, so no setup is
+  required beyond being logged into Claude Code.
+- **Display** — it comes up **windowed** instead of fullscreen, with the cursor
+  visible, so it doesn't take over your screen.
+
+With [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync                       # creates .venv with Python + pygame
+uv run python quota_api.py    # see the raw usage JSON
+uv run python quota_display.py  # windowed on macOS by default
+```
+
+Force a mode regardless of platform:
+
+```bash
+uv run python quota_display.py --windowed     # or --fullscreen
+QUOTA_WINDOWED=1 uv run python quota_display.py
+```
+
+(On the Pi, none of this changes anything — it reads the credentials file and
+launches fullscreen as before.)
+
+---
+
 ## How it works
 
 It's three small files:

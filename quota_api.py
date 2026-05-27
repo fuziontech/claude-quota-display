@@ -9,14 +9,22 @@ No third-party dependencies — stdlib only.
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
 import urllib.error
 
 CREDENTIALS_PATH = os.path.expanduser("~/.claude/.credentials.json")
+# On macOS, Claude Code stores its OAuth token in the login Keychain rather than
+# in a credentials file. When the file is absent we read/write the Keychain item
+# the CLI uses, so this runs on a Mac with no extra setup.
+IS_DARWIN = sys.platform == "darwin"
+KEYCHAIN_SERVICE = "Claude Code-credentials"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 # Public Claude Code OAuth client id (present in the CLI bundle).
@@ -29,13 +37,53 @@ class AuthError(Exception):
     """Raised when we have no usable token and cannot refresh one."""
 
 
+def _read_keychain() -> dict:
+    """Read the credentials JSON from the macOS login Keychain."""
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AuthError("no credentials in macOS Keychain (run `claude` to log in)")
+    return json.loads(result.stdout)
+
+
+def _write_keychain(creds: dict) -> None:
+    """Update the Keychain item in place (-U), matching the CLI's account/service."""
+    result = subprocess.run(
+        [
+            "security", "add-generic-password", "-U",
+            "-s", KEYCHAIN_SERVICE,
+            "-a", getpass.getuser(),
+            "-w", json.dumps(creds),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AuthError(f"could not write Keychain: {result.stderr.strip()}")
+
+
+def _use_keychain() -> bool:
+    """The Keychain is the source on macOS when no credentials file is present.
+    A file, if it exists, always wins (Linux, or an explicit export on a Mac)."""
+    return IS_DARWIN and not os.path.exists(CREDENTIALS_PATH)
+
+
 def _read_credentials() -> dict:
+    if _use_keychain():
+        return _read_keychain()
     with open(CREDENTIALS_PATH) as fh:
         return json.load(fh)
 
 
 def _write_credentials(creds: dict) -> None:
-    """Atomically replace the credentials file, preserving permissions."""
+    """Persist credentials back to wherever we read them from."""
+    if _use_keychain():
+        _write_keychain(creds)
+        return
+    # Atomically replace the credentials file, preserving permissions.
     directory = os.path.dirname(CREDENTIALS_PATH)
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".credentials.", suffix=".tmp")
     try:
