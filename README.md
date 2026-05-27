@@ -152,7 +152,7 @@ Everything tweakable is at the top of the two Python files:
 
 | Want to change… | Where |
 | --- | --- |
-| How often it polls | `POLL_INTERVAL` in `quota_display.py` (default 60s) |
+| How often it polls | `POLL_INTERVAL` in `quota_display.py` (default 5*60s) |
 | When data is flagged "stale" | `STALE_AFTER` in `quota_display.py` |
 | Colours / theme | the colour constants near the top of `quota_display.py` |
 | Colour thresholds (when bars turn yellow/red) | `bar_color()` in `quota_display.py` |
