@@ -1,0 +1,5 @@
+# The app uses only the Python standard library plus pygame.
+# On Raspberry Pi OS prefer the system package (the installer does this):
+#     sudo apt install python3-pygame
+# This file is for environments where you'd rather pip-install it.
+pygame>=2.5

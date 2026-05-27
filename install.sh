@@ -38,10 +38,21 @@ mkdir -p "$CONFIG/labwc"
 AUTOSTART="$CONFIG/labwc/autostart"
 LAUNCH="/usr/bin/lwrespawn $REPO_DIR/run.sh &"
 
-# Seed a user autostart from the system one the first time (labwc uses the
-# user file *instead of* the system default, so we must reproduce it).
-if [ ! -f "$AUTOSTART" ] && [ -f /etc/xdg/labwc/autostart ]; then
-  cp /etc/xdg/labwc/autostart "$AUTOSTART"
+# Seed a user autostart the first time. labwc runs the user file *instead of*
+# the system default, so we must reproduce the desktop's own startup entries —
+# otherwise the panel, desktop and output config would never launch.
+if [ ! -f "$AUTOSTART" ]; then
+  if [ -f /etc/xdg/labwc/autostart ]; then
+    cp /etc/xdg/labwc/autostart "$AUTOSTART"
+  else
+    echo "    no /etc/xdg/labwc/autostart found — writing the standard defaults"
+    cat > "$AUTOSTART" <<'EOF'
+/usr/bin/lwrespawn /usr/bin/pcmanfm-pi &
+/usr/bin/lwrespawn /usr/bin/wf-panel-pi &
+/usr/bin/kanshi &
+/usr/bin/lxsession-xdg-autostart
+EOF
+  fi
 fi
 touch "$AUTOSTART"
 
