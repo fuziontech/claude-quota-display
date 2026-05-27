@@ -51,12 +51,17 @@ def _write_credentials(creds: dict) -> None:
         raise
 
 
-def _refresh_token(creds: dict) -> dict:
+def _refresh_token() -> dict:
     """Refresh the access token using the refresh token; persist the result.
+
+    Reads the credentials fresh (so we always use the newest refresh token the
+    claude CLI may have written) and, on success, merges only the token fields
+    back into a freshly re-read file — never the stale snapshot — so we cannot
+    clobber other fields the CLI updated concurrently.
 
     Returns the updated claudeAiOauth dict. Raises AuthError on failure.
     """
-    oauth = creds["claudeAiOauth"]
+    oauth = _read_credentials().get("claudeAiOauth", {})
     refresh_token = oauth.get("refreshToken")
     if not refresh_token:
         raise AuthError("no refresh token available")
@@ -77,18 +82,25 @@ def _refresh_token(creds: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode())
+        access_token = data["access_token"]
     except urllib.error.HTTPError as exc:
         raise AuthError(f"refresh failed: HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise AuthError(f"refresh failed: {exc}") from exc
+    except (KeyError, ValueError) as exc:
+        raise AuthError(f"refresh failed: bad response ({exc})") from exc
 
-    oauth["accessToken"] = data["access_token"]
+    # Re-read right before writing and touch only the token fields, so a
+    # concurrent CLI refresh in the meantime is not reverted.
+    creds = _read_credentials()
+    latest = creds.setdefault("claudeAiOauth", {})
+    latest["accessToken"] = access_token
     if data.get("refresh_token"):
-        oauth["refreshToken"] = data["refresh_token"]
-    if data.get("expires_in"):
-        oauth["expiresAt"] = int(time.time() * 1000) + int(data["expires_in"]) * 1000
+        latest["refreshToken"] = data["refresh_token"]
+    if data.get("expires_in") is not None:
+        latest["expiresAt"] = int(time.time() * 1000) + int(data["expires_in"]) * 1000
     _write_credentials(creds)
-    return oauth
+    return latest
 
 
 def _is_expired(oauth: dict, skew_ms: int = 60_000) -> bool:
@@ -111,20 +123,28 @@ def _request_usage(access_token: str) -> dict:
         return json.loads(resp.read().decode())
 
 
+def _refresh_or_reload() -> dict:
+    """Refresh the token, or — if our refresh loses a race with the CLI — fall
+    back to whatever token the CLI just wrote to disk."""
+    try:
+        return _refresh_token()
+    except AuthError:
+        return _read_credentials().get("claudeAiOauth", {})
+
+
 def fetch_usage() -> dict:
     """Fetch current usage. Refreshes the token if needed. Raises on failure."""
-    creds = _read_credentials()
-    oauth = creds["claudeAiOauth"]
+    oauth = _read_credentials().get("claudeAiOauth", {})
 
     if _is_expired(oauth):
-        oauth = _refresh_token(creds)
+        oauth = _refresh_or_reload()
 
     try:
         return _request_usage(oauth["accessToken"])
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
-            # Token rejected — try one refresh then retry once.
-            oauth = _refresh_token(creds)
+            # Token rejected — refresh (or reload the CLI's token) and retry once.
+            oauth = _refresh_or_reload()
             return _request_usage(oauth["accessToken"])
         raise
 

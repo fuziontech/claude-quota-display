@@ -31,9 +31,9 @@ renders it as big, across-the-room-readable bars:
   as you approach a limit.
 
 It's deliberately boring in the best way: a light, steady load — around 130 MB
-of RAM and a fraction of one of the Pi's CPU cores (it redraws at a lazy 4 fps) —
-and it survives network blips by showing the last known numbers with a small
-"stale" marker.
+of RAM and a CPU that sits essentially idle (it only repaints when the clock
+ticks or the numbers change, ~0% the rest of the time) — and it survives network
+blips by showing the last known numbers with a small "stale" marker.
 
 ---
 
@@ -132,8 +132,8 @@ It's three small files:
 
 - **`quota_display.py`** — the UI. A pygame fullscreen app with a background
   thread doing the fetching (so a slow network never freezes the clock) and a
-  main loop redrawing at a lazy 4 fps. Layout, colours, and thresholds all live
-  at the top of the file.
+  main loop that only repaints when something visible changes, so it stays near
+  0% CPU. Layout, colours, and thresholds all live at the top of the file.
 
 - **`run.sh`** — a one-line launcher used by the autostart.
 

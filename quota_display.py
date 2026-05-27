@@ -50,13 +50,15 @@ class State:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.usage: dict | None = None
-        self.last_success: float = 0.0
+        self.last_success: float = 0.0       # wall clock, for display
+        self.last_success_mono: float = 0.0  # monotonic, for age/staleness
         self.error: str | None = None
 
     def update_ok(self, usage: dict) -> None:
         with self.lock:
             self.usage = usage
             self.last_success = time.time()
+            self.last_success_mono = time.monotonic()
             self.error = None
 
     def update_err(self, msg: str) -> None:
@@ -65,7 +67,7 @@ class State:
 
     def snapshot(self):
         with self.lock:
-            return self.usage, self.last_success, self.error
+            return self.usage, self.last_success, self.last_success_mono, self.error
 
 
 def fetch_loop(state: State, stop: threading.Event) -> None:
@@ -95,7 +97,8 @@ def fmt_reset_short(when: dt.datetime | None) -> str:
         return f"resets {when:%H:%M}"
     if (when.date() - now.date()).days == 1:
         return f"resets tomorrow {when:%H:%M}"
-    return f"resets {when:%a %b %-d}"
+    # Build the day without %-d, which is glibc-only.
+    return f"resets {when:%a %b} {when.day}"
 
 
 # ---- drawing --------------------------------------------------------------
@@ -145,8 +148,19 @@ class Display:
         if reset_text:
             self._text(self.f_small, reset_text, MUTED, PAD, y + 70)
 
+    @staticmethod
+    def signature(state: State) -> tuple:
+        """A cheap fingerprint of everything on screen, so the main loop can
+        skip the redraw+flip when nothing has changed (keeps CPU near idle)."""
+        usage, last_success, last_success_mono, error = state.snapshot()
+        now = dt.datetime.now().astimezone()
+        stale = bool(last_success_mono) and (
+            time.monotonic() - last_success_mono > STALE_AFTER
+        )
+        return (now.strftime("%H:%M:%S"), last_success, error, usage is None, stale)
+
     def render(self, state: State) -> None:
-        usage, last_success, error = state.snapshot()
+        usage, last_success, last_success_mono, error = state.snapshot()
         self.screen.fill(BG)
 
         # header
@@ -158,7 +172,7 @@ class Display:
                          (WIDTH - PAD, PAD + 48), 2)
 
         if usage is None:
-            msg = error or "connecting..."
+            msg = (error or "connecting...")[:42]
             self._text(self.f_label, msg, MUTED, WIDTH // 2, HEIGHT // 2 - 20,
                        center=True)
             return
@@ -195,7 +209,7 @@ class Display:
             footer = f"stale - {error[:46]}"
             color = ORANGE
         elif last_success:
-            age = time.time() - last_success
+            age = time.monotonic() - last_success_mono
             stale = age > STALE_AFTER
             footer = f"updated {dt.datetime.fromtimestamp(last_success):%H:%M:%S}"
             if stale:
@@ -213,8 +227,9 @@ def main() -> None:
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     pygame.init()
     pygame.mouse.set_visible(False)
-    flags = pygame.FULLSCREEN | pygame.SCALED
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
+    # No SCALED: the window already matches the native 640x480, so scaling
+    # would just burn CPU on a per-frame blit.
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
     pygame.display.set_caption("Claude Quota")
 
     state = State()
@@ -224,6 +239,7 @@ def main() -> None:
 
     display = Display(screen)
     clock = pygame.time.Clock()
+    last_sig = None
     running = True
     while running:
         for event in pygame.event.get():
@@ -233,9 +249,14 @@ def main() -> None:
                 pygame.K_ESCAPE, pygame.K_q,
             ):
                 running = False
-        display.render(state)
-        pygame.display.flip()
-        clock.tick(4)  # 4 fps is plenty for a clock; keeps CPU near idle
+        # Only repaint when something visible actually changed (the clock ticks
+        # once a second), so the loop is effectively idle the rest of the time.
+        sig = display.signature(state)
+        if sig != last_sig:
+            display.render(state)
+            pygame.display.flip()
+            last_sig = sig
+        clock.tick(10)  # poll for input/clock changes 10x/s; redraw is gated
 
     stop.set()
     pygame.quit()
