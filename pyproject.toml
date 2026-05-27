@@ -1,0 +1,15 @@
+[project]
+name = "claude-quota-display"
+version = "1.0.0"
+description = "A tiny, always-on dashboard for your Claude usage."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dependencies = [
+    # quota_api.py is stdlib-only; pygame is only needed for the display UI.
+    "pygame>=2.5",
+]
+
+[tool.uv]
+# A pair of scripts, not an installable package — just manage the environment.
+package = false

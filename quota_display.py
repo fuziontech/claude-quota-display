@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import sys
 import threading
 import time
 import urllib.error
@@ -247,13 +248,32 @@ class Display:
                        center=True)
 
 
+def _want_windowed(argv: list[str]) -> bool:
+    """Fullscreen kiosk by default; windowed on macOS (dev) or when asked.
+
+    `--windowed`/`--fullscreen` win, then $QUOTA_WINDOWED, then the platform
+    default — so the Pi stays fullscreen while a Mac comes up in a window.
+    """
+    if "--windowed" in argv:
+        return True
+    if "--fullscreen" in argv:
+        return False
+    env = os.environ.get("QUOTA_WINDOWED")
+    if env is not None:
+        return env.strip().lower() not in ("", "0", "false", "no")
+    return sys.platform == "darwin"
+
+
 def main() -> None:
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    windowed = _want_windowed(sys.argv[1:])
     pygame.init()
-    pygame.mouse.set_visible(False)
+    # Hide the cursor in the kiosk; keep it in a window so you can move/close it.
+    pygame.mouse.set_visible(windowed)
     # No SCALED: the window already matches the native 640x480, so scaling
     # would just burn CPU on a per-frame blit.
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+    flags = 0 if windowed else pygame.FULLSCREEN
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     pygame.display.set_caption("Claude Quota")
 
     state = State()
