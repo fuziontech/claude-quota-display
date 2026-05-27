@@ -2,6 +2,10 @@
 
 **A tiny, always-on dashboard for your Claude usage — running on a Raspberry Pi in an adorable little Macintosh.**
 
+<p align="center">
+  <img src="docs/full_build.jpg" alt="The finished build: a Raspberry Pi in a 3D-printed Macintosh Plus" width="360">
+</p>
+
 ![The display running on a 640×480 screen](docs/screenshot.png)
 
 ---
