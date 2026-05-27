@@ -11,6 +11,7 @@ import datetime as dt
 import os
 import threading
 import time
+import urllib.error
 
 import pygame
 
@@ -19,8 +20,9 @@ import quota_api
 # ---- layout / theme -------------------------------------------------------
 WIDTH, HEIGHT = 640, 480
 PAD = 28
-POLL_INTERVAL = 60          # seconds between usage fetches
-STALE_AFTER = 5 * 60        # seconds before cached data is flagged stale
+POLL_INTERVAL = 5 * 60      # seconds between usage fetches (quotas move slowly)
+MAX_BACKOFF = 30 * 60       # cap for exponential backoff after errors
+STALE_AFTER = 20 * 60       # seconds before cached data is flagged stale
 
 BG = (16, 18, 24)
 FG = (235, 237, 243)
@@ -70,13 +72,35 @@ class State:
             return self.usage, self.last_success, self.last_success_mono, self.error
 
 
+def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
+    """Parse a Retry-After header (delta-seconds form) if the server sent one."""
+    value = exc.headers.get("Retry-After") if exc.headers else None
+    if value and value.strip().isdigit():
+        return float(value.strip())
+    return None
+
+
 def fetch_loop(state: State, stop: threading.Event) -> None:
+    """Poll the usage endpoint, backing off exponentially on errors so we never
+    hammer the API — and honouring Retry-After when we're rate-limited (429)."""
+    backoff = POLL_INTERVAL
     while not stop.is_set():
         try:
             state.update_ok(quota_api.fetch_usage())
+            backoff = POLL_INTERVAL
+            wait = POLL_INTERVAL
+        except urllib.error.HTTPError as exc:
+            state.update_err(str(exc))
+            backoff = min(backoff * 2, MAX_BACKOFF)
+            # On a rate-limit, prefer the server's own Retry-After hint.
+            wait = backoff
+            if exc.code == 429:
+                wait = max(_retry_after_seconds(exc) or 0, backoff)
         except Exception as exc:  # noqa: BLE001 - keep the display alive
             state.update_err(str(exc))
-        stop.wait(POLL_INTERVAL)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+            wait = backoff
+        stop.wait(wait)
 
 
 # ---- formatting helpers ---------------------------------------------------
