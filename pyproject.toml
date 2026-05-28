@@ -10,6 +10,9 @@ dependencies = [
     "pygame>=2.5",
 ]
 
+[project.optional-dependencies]
+macos = ["rumps>=0.4"]
+
 [tool.uv]
 # A pair of scripts, not an installable package — just manage the environment.
 package = false
